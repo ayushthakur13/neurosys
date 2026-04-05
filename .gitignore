@@ -1,0 +1,42 @@
+# OS
+.DS_Store
+
+# Python caches and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test and lint artifacts
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local experiment outputs
+results/
+!results/.gitkeep
+
+# Local datasets (keep placeholders only)
+data/*
+!data/.gitkeep
+
+# Logs and temp
+*.log
+*.tmp
+*.swp

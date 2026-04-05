@@ -1,0 +1,66 @@
+seed: 42
+
+dataset:
+  name: hdfs_xu
+  root: data
+  format: pregrouped_sequences
+  train_sequences: hdfs_train.txt
+  test_normal_sequences: hdfs_test_normal.txt
+  test_abnormal_sequences: hdfs_test_abnormal.txt
+  limit_train_sequences: 500
+  limit_eval_normal_sequences: 300
+  limit_eval_abnormal_sequences: 200
+  second_dataset:
+    enabled: false
+    name: bgl
+    root: data/bgl
+    raw_log: BGL.log
+    labels: BGL_labels.csv
+
+features:
+  representation: temporal
+  min_count: 1
+  normalize: l2
+  max_vocab_size: null
+  unknown_token: <UNK>
+  max_sequence_length: 64
+  positional_encoding_type: absolute
+
+baselines:
+  isolation_forest:
+    contamination: 0.1
+    n_estimators: 80
+    random_state: 42
+  pca:
+    n_components: 0.95
+
+vae:
+  latent_dims: [8]
+  hidden_dim: 64
+  embedding_dim: 32
+  learning_rate: 0.001
+  epochs: 1
+  batch_size: 128
+  beta_values: [1.0]
+  threshold_percentile: 95
+  validation_split: 0.2
+  beta_warmup_epochs: 0
+
+analysis:
+  embedding_method: pca
+  max_points_for_embedding: 5000
+  trajectory_window: 8
+  failure_clustering: dbscan
+  dbscan_eps: 0.8
+  dbscan_min_samples: 5
+  kmeans_k: 4
+
+synthetic_injection:
+  enabled: false
+  ratio: 0.1
+  modes: [insert, remove, shuffle]
+
+outputs:
+  root: results
+  run_name: temporal_smoke_run
+  save_plots: true
