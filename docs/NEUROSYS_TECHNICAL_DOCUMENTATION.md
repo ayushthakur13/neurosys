@@ -28,7 +28,7 @@ Created the modular project structure:
 - experiments
 - notebooks
 - results
-- src/neurosys
+- src
 - tests
 - docs
 
@@ -52,6 +52,7 @@ Implemented:
 - configs/full_scale.yaml: full-scale experiment configuration
 - configs/temporal_smoke.yaml: temporal sequence-model smoke config
 - configs/temporal_full_scale.yaml: temporal sequence-model full-scale config
+- configs/temporal_hybrid.yaml: optimized temporal config with KL-weighted scoring and VAE+PCA ensemble reporting
 
 The default config now supports your current HDFS Xu split-file format under data/.
 
@@ -232,10 +233,12 @@ Objects:
 
 Implements the temporal VAE path:
 
-- GRU encoder and GRU decoder
+- Bidirectional GRU encoder and GRU decoder
+- Dropout-regularized embeddings and encoder normalization
 - Mask-aware reconstruction loss
 - Validation-based beta-optimized training path
 - Latent extraction on ordered sequences
+- KL-weighted anomaly scoring (`reconstruction + kl_weight * KL`)
 
 Objects:
 
@@ -387,6 +390,11 @@ Pipeline steps:
 18. Optionally evaluate on second dataset (cross-system)
 19. Save artifacts, plots, and summary
 
+For temporal runs, the pipeline also reports an ensemble detector:
+
+- temporal_vae_pca_ensemble = average of best temporal VAE anomaly scores and PCA reconstruction scores
+- dedicated ROC/confusion-matrix plots and summary metrics for this ensemble
+
 Saved artifacts:
 
 - X.npy
@@ -488,6 +496,62 @@ Full-scale key metrics:
 - PCA Reconstruction: F1 0.4338, ROC-AUC 0.9752
 - VAE best: F1 0.2729, ROC-AUC 0.7814
 
+## 6.4 Temporal Full-Scale Run
+
+Executed:
+
+- .venv/bin/python experiments/run_pipeline.py --config configs/temporal_full_scale.yaml
+
+Result:
+
+- Completed successfully
+- Summary generated at results/temporal_full_scale_run/summary.json
+
+Highlights:
+
+- num_sequences_train: 4466
+- num_sequences_eval: 569478
+- num_anomalies_eval: 16838
+
+Key metrics:
+
+- Isolation Forest: F1 0.1535, ROC-AUC 0.8772
+- PCA Reconstruction: F1 0.5138, ROC-AUC 0.9962
+- Temporal VAE best: F1 0.0577, ROC-AUC 0.9886
+
+Observation:
+
+- Standalone temporal VAE had strong ranking quality (high ROC-AUC) but poor thresholded precision/recall balance in this configuration.
+
+## 6.5 Temporal Hybrid Run (Improved)
+
+Executed:
+
+- .venv/bin/python experiments/run_pipeline.py --config configs/temporal_hybrid.yaml
+
+Result:
+
+- Completed successfully
+- Summary generated at results/temporal_hybrid_run/summary.json
+
+Configuration changes vs temporal_full_scale:
+
+- lower learning rate (0.0005)
+- validation split 0.3
+- KL-weighted temporal scoring enabled
+- temporal VAE + PCA ensemble reporting enabled
+
+Key metrics:
+
+- Isolation Forest: F1 0.4425, ROC-AUC 0.8821
+- PCA Reconstruction: F1 0.5138, ROC-AUC 0.9967
+- Temporal VAE best: F1 0.0576, ROC-AUC 0.9953
+- Temporal VAE + PCA Ensemble: F1 0.9133, ROC-AUC 0.9974
+
+Conclusion:
+
+- The hybrid ensemble is currently the best-performing detector in this repository.
+
 ## 7. Current Configuration Details
 
 ## 7.1 Default Config Highlights (configs/default.yaml)
@@ -557,6 +621,7 @@ Root cause response:
 3. Causal graph is statistical temporal approximation, not formal causal identification.
 4. Cross-system generalization path is implemented but requires second dataset files to be present and configured.
 5. API startup artifact path defaults to results/default_run/artifacts; if only smoke_run exists, either copy artifacts or update service path.
+6. Standalone temporal VAE may still underperform under hard thresholds; operational use should prefer the temporal ensemble output where available.
 
 ## 11. File Index (Implemented Core)
 
@@ -612,6 +677,18 @@ Setup:
 Smoke run:
 
 - .venv/bin/python experiments/run_pipeline.py --config configs/smoke.yaml
+
+Temporal smoke run:
+
+- .venv/bin/python experiments/run_pipeline.py --config configs/temporal_smoke.yaml
+
+Temporal full-scale run:
+
+- .venv/bin/python experiments/run_pipeline.py --config configs/temporal_full_scale.yaml
+
+Temporal hybrid run:
+
+- .venv/bin/python experiments/run_pipeline.py --config configs/temporal_hybrid.yaml
 
 Default run:
 

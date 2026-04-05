@@ -232,6 +232,13 @@ def main(config_path: str) -> None:
                 train_scores = trainer.reconstruction_error(train_batch.token_ids, train_batch.mask)
                 val_scores = trainer.reconstruction_error(val_batch.token_ids, val_batch.mask)
                 eval_scores = trainer.reconstruction_error(eval_batch.token_ids, eval_batch.mask)
+                
+                # Use KL divergence weighted anomaly score if config specifies
+                kl_weight = float(cfg["vae"].get("kl_weight", 0.0))
+                if kl_weight > 0:
+                    val_scores = trainer.anomaly_score_with_kl(val_batch.token_ids, val_batch.mask, kl_weight=kl_weight)
+                    eval_scores = trainer.anomaly_score_with_kl(eval_batch.token_ids, eval_batch.mask, kl_weight=kl_weight)
+                
                 threshold, validation_f1 = threshold_by_f1_optimization(
                     validation_labels if len(validation_labels) else train_labels,
                     val_scores,
@@ -248,6 +255,11 @@ def main(config_path: str) -> None:
                     print(f"    New best temporal VAE F1={float(ev['f1']):.4f}")
 
         assert best_vae is not None and best_vae_eval is not None and best_vae_cfg is not None and best_scores is not None and best_threshold is not None
+
+        # Ensemble VAE + PCA for improved detection
+        ensemble_scores = (best_scores + b_scores.pca_recon) / 2.0
+        ensemble_threshold, ensemble_f1 = threshold_by_f1_optimization(eval_labels, ensemble_scores)
+        ensemble_eval = evaluate_model("temporal_vae_pca_ensemble", eval_labels, ensemble_scores, ensemble_threshold)
 
         print("[6/10] Computing latent representations...")
         z = best_vae.latent(eval_batch.token_ids, eval_batch.mask)
@@ -441,9 +453,14 @@ def main(config_path: str) -> None:
     plot_roc(eval_labels, b_scores.isolation_forest, plots_dir / "roc_isolation_forest.png", "Isolation Forest ROC")
     plot_roc(eval_labels, b_scores.pca_recon, plots_dir / "roc_pca.png", "PCA ROC")
     plot_roc(eval_labels, best_scores, plots_dir / "roc_vae.png", "VAE ROC")
+    if representation == "temporal":
+        plot_roc(eval_labels, ensemble_scores, plots_dir / "roc_ensemble.png", "VAE+PCA Ensemble ROC")
     plot_confusion_matrix(cm_if, plots_dir / "cm_isolation_forest.png", "Isolation Forest")
     plot_confusion_matrix(cm_pca, plots_dir / "cm_pca.png", "PCA Reconstruction")
     plot_confusion_matrix(cm_vae, plots_dir / "cm_vae.png", "VAE")
+    if representation == "temporal":
+        cm_ensemble = confusion_matrix(eval_labels, (ensemble_scores >= float(ensemble_eval["threshold"])).astype(int), labels=[0, 1])
+        plot_confusion_matrix(cm_ensemble, plots_dir / "cm_ensemble.png", "VAE+PCA Ensemble")
     plot_latent_2d(embed, eval_labels[embed_idx], plots_dir / "latent_space.png", "Latent Space Projection")
 
     summary = {
@@ -456,6 +473,7 @@ def main(config_path: str) -> None:
             "isolation_forest": if_eval,
             "pca": pca_eval,
             "vae_best": best_vae_eval,
+            "ensemble": ensemble_eval if representation == "temporal" else None,
             "cross_system": second_eval,
         },
         "vae_best_config": best_vae_cfg.__dict__,

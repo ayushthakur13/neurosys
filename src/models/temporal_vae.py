@@ -28,19 +28,23 @@ class TemporalVAE(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.embedding = nn.Embedding(cfg.vocab_size, cfg.embedding_dim, padding_idx=cfg.pad_index)
-        self.encoder = nn.GRU(cfg.embedding_dim, cfg.hidden_dim, batch_first=True)
-        self.mu = nn.Linear(cfg.hidden_dim, cfg.latent_dim)
-        self.logvar = nn.Linear(cfg.hidden_dim, cfg.latent_dim)
+        self.embedding_dropout = nn.Dropout(0.3)
+        self.encoder = nn.GRU(cfg.embedding_dim, cfg.hidden_dim, batch_first=True, bidirectional=True)
+        self.encoder_norm = nn.LayerNorm(cfg.hidden_dim * 2)
+        self.mu = nn.Linear(cfg.hidden_dim * 2, cfg.latent_dim)
+        self.logvar = nn.Linear(cfg.hidden_dim * 2, cfg.latent_dim)
         self.decoder_init = nn.Linear(cfg.latent_dim, cfg.hidden_dim)
         self.decoder = nn.GRU(cfg.embedding_dim, cfg.hidden_dim, batch_first=True)
         self.output = nn.Linear(cfg.hidden_dim, cfg.vocab_size)
 
     def encode(self, token_ids: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         embedded = self.embedding(token_ids)
+        embedded = self.embedding_dropout(embedded)
         lengths = mask.sum(dim=1).long().clamp(min=1)
         packed = nn.utils.rnn.pack_padded_sequence(embedded, lengths.cpu(), batch_first=True, enforce_sorted=False)
         _, hidden = self.encoder(packed)
-        hidden = hidden[-1]
+        hidden = torch.cat([hidden[0], hidden[1]], dim=1)  # Concatenate bidirectional outputs
+        hidden = self.encoder_norm(hidden)
         return self.mu(hidden), self.logvar(hidden)
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
@@ -114,21 +118,63 @@ class TemporalVAETrainer:
     @torch.no_grad()
     def reconstruction_error(self, token_ids: np.ndarray, mask: np.ndarray) -> np.ndarray:
         self.model.eval()
-        x_ids = torch.tensor(token_ids, dtype=torch.long, device=self.device)
-        x_mask = torch.tensor(mask, dtype=torch.float32, device=self.device)
-        logits, _, _ = self.model(x_ids, x_mask)
-        recon = nn.functional.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            x_ids.reshape(-1),
-            reduction="none",
-        )
-        recon = recon.reshape(x_ids.shape[0], x_ids.shape[1])
-        return ((recon * x_mask).sum(dim=1) / x_mask.sum(dim=1).clamp(min=1.0)).cpu().numpy()
+        n_rows = int(token_ids.shape[0])
+        errors = np.empty(n_rows, dtype=np.float32)
+        batch_size = max(1, int(self.cfg.batch_size))
+
+        for start in range(0, n_rows, batch_size):
+            end = min(start + batch_size, n_rows)
+            x_ids = torch.tensor(token_ids[start:end], dtype=torch.long, device=self.device)
+            x_mask = torch.tensor(mask[start:end], dtype=torch.float32, device=self.device)
+            logits, _, _ = self.model(x_ids, x_mask)
+            recon = nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                x_ids.reshape(-1),
+                reduction="none",
+            )
+            recon = recon.reshape(x_ids.shape[0], x_ids.shape[1])
+            batch_error = (recon * x_mask).sum(dim=1) / x_mask.sum(dim=1).clamp(min=1.0)
+            errors[start:end] = batch_error.cpu().numpy()
+
+        return errors
+
+    @torch.no_grad()
+    def anomaly_score_with_kl(self, token_ids: np.ndarray, mask: np.ndarray, kl_weight: float = 0.1) -> np.ndarray:
+        """Anomaly score combining reconstruction error + KL divergence penalty."""
+        self.model.eval()
+        n_rows = int(token_ids.shape[0])
+        scores = np.empty(n_rows, dtype=np.float32)
+        batch_size = max(1, int(self.cfg.batch_size))
+
+        for start in range(0, n_rows, batch_size):
+            end = min(start + batch_size, n_rows)
+            x_ids = torch.tensor(token_ids[start:end], dtype=torch.long, device=self.device)
+            x_mask = torch.tensor(mask[start:end], dtype=torch.float32, device=self.device)
+            logits, mu, logvar = self.model(x_ids, x_mask)
+            recon = nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                x_ids.reshape(-1),
+                reduction="none",
+            )
+            recon = recon.reshape(x_ids.shape[0], x_ids.shape[1])
+            recon_error = (recon * x_mask).sum(dim=1) / x_mask.sum(dim=1).clamp(min=1.0)
+            kl_div = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+            batch_score = recon_error + kl_weight * kl_div
+            scores[start:end] = batch_score.cpu().numpy()
+        return scores
 
     @torch.no_grad()
     def latent(self, token_ids: np.ndarray, mask: np.ndarray) -> np.ndarray:
         self.model.eval()
-        x_ids = torch.tensor(token_ids, dtype=torch.long, device=self.device)
-        x_mask = torch.tensor(mask, dtype=torch.float32, device=self.device)
-        mu, _ = self.model.encode(x_ids, x_mask)
-        return mu.cpu().numpy()
+        n_rows = int(token_ids.shape[0])
+        latents = np.empty((n_rows, int(self.cfg.latent_dim)), dtype=np.float32)
+        batch_size = max(1, int(self.cfg.batch_size))
+
+        for start in range(0, n_rows, batch_size):
+            end = min(start + batch_size, n_rows)
+            x_ids = torch.tensor(token_ids[start:end], dtype=torch.long, device=self.device)
+            x_mask = torch.tensor(mask[start:end], dtype=torch.float32, device=self.device)
+            mu, _ = self.model.encode(x_ids, x_mask)
+            latents[start:end] = mu.cpu().numpy()
+
+        return latents

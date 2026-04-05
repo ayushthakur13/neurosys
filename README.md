@@ -7,6 +7,7 @@ NeuroSys is a research-grade AIOps framework for modeling distributed system beh
 - Log parsing and sequence construction (HDFS Xu style block-centric sequences)
 - Baseline anomaly detection (Isolation Forest, PCA reconstruction)
 - VAE-based latent behavior modeling and anomaly scoring
+- Hybrid temporal detector (Temporal VAE + PCA ensemble)
 - Latent trajectory and velocity-based failure prediction
 - Unsupervised failure typing via clustering
 - Counterfactual root cause reasoning and causal approximation
@@ -39,8 +40,19 @@ NeuroSys is a research-grade AIOps framework for modeling distributed system beh
    - `python experiments/run_pipeline.py --config configs/full_scale.yaml`
    - `python experiments/run_pipeline.py --config configs/temporal_smoke.yaml`
    - `python experiments/run_pipeline.py --config configs/temporal_full_scale.yaml`
+   - `python experiments/run_pipeline.py --config configs/temporal_hybrid.yaml`
 5. Start API:
    - `python -m api.server`
+
+## Latest Benchmark Snapshot
+
+From the latest temporal hybrid run (`results/temporal_hybrid_run/summary.json`):
+
+- Temporal VAE + PCA ensemble: F1 `0.9133`, ROC-AUC `0.9974`
+- PCA reconstruction baseline: F1 `0.5138`, ROC-AUC `0.9967`
+- Isolation Forest baseline: F1 `0.4425`, ROC-AUC `0.8821`
+
+This means the hybrid ensemble currently outperforms standalone PCA on F1 by a large margin on the HDFS Xu split setup.
 
 ## Expected HDFS Xu Files
 

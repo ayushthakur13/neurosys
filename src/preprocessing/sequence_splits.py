@@ -109,14 +109,23 @@ class HDFSXuSplitDataset:
         return self.normal_labels + self.abnormal_labels
 
     def split_train_validation(self, validation_ratio: float = 0.2) -> tuple[list[list[str]], list[int], list[list[str]], list[int]]:
-        """Split the train split into train-normal and validation-normal subsets."""
+        """Split the train split into train and validation subsets with stratification by label."""
         if not self.train_sequences:
             return [], [], [], []
 
-        split_index = max(1, int(len(self.train_sequences) * (1.0 - validation_ratio)))
-        split_index = min(split_index, len(self.train_sequences) - 1) if len(self.train_sequences) > 1 else len(self.train_sequences)
-        train_sequences = self.train_sequences[:split_index]
-        train_labels = self.train_labels[:split_index]
-        validation_sequences = self.train_sequences[split_index:]
-        validation_labels = self.train_labels[split_index:]
+        # Stratified split: ensure both train and validation have positive samples if possible
+        normal_idx = [i for i, label in enumerate(self.train_labels) if label == 0]
+        abnormal_idx = [i for i, label in enumerate(self.train_labels) if label == 1]
+
+        normal_split = max(1, int(len(normal_idx) * (1.0 - validation_ratio)))
+        abnormal_split = max(1, int(len(abnormal_idx) * (1.0 - validation_ratio))) if abnormal_idx else 0
+
+        train_idx = normal_idx[:normal_split] + abnormal_idx[:abnormal_split]
+        val_idx = normal_idx[normal_split:] + abnormal_idx[abnormal_split:]
+
+        train_sequences = [self.train_sequences[i] for i in train_idx]
+        train_labels = [self.train_labels[i] for i in train_idx]
+        validation_sequences = [self.train_sequences[i] for i in val_idx]
+        validation_labels = [self.train_labels[i] for i in val_idx]
+
         return train_sequences, train_labels, validation_sequences, validation_labels
